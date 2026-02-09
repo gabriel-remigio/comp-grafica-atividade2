@@ -5,7 +5,7 @@ from OpenGL.GLU import *
 
 # Retorna os vertices do arquivo .ply de entrada
 # Linha por linha, primeiro procura pela linha "element vertex" para descobrir a quantidade N de vertices
-# Entao, apos ler "end header", coleta todos os N vertices seguintes numa matriz
+# Entao, apos ler "end header", coleta todos os N vertices seguintes numa matriz com os pontos em cada linha
 def read_model(model_path):
   try:
       with open(model_path, 'r') as file:
@@ -16,7 +16,7 @@ def read_model(model_path):
         for line in file:
           if collecting and points_to_collect > 0:
             coordinates = line.strip().split()
-            points.append([float(coordinates[0]), float(coordinates[1]), float(coordinates[2])])
+            points.append([float(coordinates[0]), float(coordinates[1]), float(coordinates[2]), 1.0])
             points_to_collect -= 1
 
             if points_to_collect <= 0:
@@ -80,7 +80,8 @@ points = read_model(model_path)
 
 # prepara a janela
 clock = pygame.time.Clock()
-pygame.display.set_mode((800, 600), pygame.DOUBLEBUF | pygame.OPENGL)
+width, height = 800, 600
+screen = pygame.display.set_mode((width, height))
 running = True
 
 # Valores iniciais 
@@ -114,34 +115,45 @@ while running:
       if event.key == pygame.K_f:
         fov -= 5
 
-  # Limpa a tela e o buffer de profundidade
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-  glMatrixMode(GL_PROJECTION)
-  glLoadIdentity()
+  screen.fill((0.0, 0.0, 0.0))
+  # Prepara as matrizes
+  projection = perspective_matrix(fov, width, height, 0.1, 10)
+  rotation = rotation_matrix(angle, 0.0, 1.0, 0.0)
+  translation = translation_matrix(x, y, -2)
 
-  # Carrego a matriz de projecao
-  projection_matrix = perspective_matrix(fov, 800, 600, 10, 0.1)
-  projection_matrix_openGL = projection_matrix.T.flatten()
-  glLoadMatrixf(projection_matrix_openGL)
+  # Calcula a matriz final e aplica nos pontos
+  # points precisa ser transposto pois a funcao que carrega o modelo 
+  # salva os pontos nas linhas ao inves de nas colunas
+  final = projection @ (translation @ rotation)
+  transformed = final @ points.T
+  px = transformed[0, :]
+  py = transformed[1, :]
+  pw = transformed[3, :]
 
-  glMatrixMode(GL_MODELVIEW)
-  glLoadIdentity()
+  # Filtra por pontos visiveis
+  visibility_filter = pw > 0.001
+  px_visible = px[visibility_filter]
+  py_visible = py[visibility_filter]
+  pw_visible = pw[visibility_filter]
 
-  # Carrego a matriz de transformacao
-  transform_matrix = translation_matrix(x, y, -1.0) @ rotation_matrix(angle, 1.0, 1.0, 0.5)
-  transform_matrix_openGL = transform_matrix.T.flatten()
-  glLoadMatrixf(transform_matrix_openGL)
+  # Realiza a divisao por W para criar a perspectiva
+  px_normalized = px_visible / pw_visible
+  py_normalized = py_visible / pw_visible
 
-  glBegin(GL_POINTS)
-  glColor3f(1.0, 1.0, 1.0)
+  # Converte de coordenadas [-1, 1] para a tela [0, width] e [0, height]
+  # screen_y é invertido pois no PyGame Y é positivo para baixo
+  screen_x = (px_normalized + 1) * width / 2.0
+  screen_y = (1 - py_normalized) * height / 2.0
 
-  # Desenho os pontos do modelo
-  for point in points:
-    glVertex3fv(point)
+  # Pinta cada pixel na tela
+  for i in range(len(screen_x)):
+    pixel_x = int(screen_x[i])
+    pixel_y = int(screen_y[i])
+    
+    if 0 <= pixel_x and pixel_x < width and 0 <= pixel_y and pixel_y < height:
+      screen.set_at((pixel_x, pixel_y), (255, 255, 255))
 
-  glEnd()
-
-  # Exibo na tela
+  # Exibe na tela
   pygame.display.flip()
   clock.tick(60)
 
